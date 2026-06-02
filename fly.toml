@@ -1,0 +1,22 @@
+# Fly.io config. Deploy with: fly launch --no-deploy  (then)  fly deploy
+# Create the data volume once:  fly volumes create crm_data --size 1
+app = "sailone-crm"
+primary_region = "iad"   # change to your nearest region
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  DB_PATH = "/data/sailone_crm.db"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[mounts]]
+  source = "crm_data"
+  destination = "/data"

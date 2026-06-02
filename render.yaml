@@ -1,0 +1,39 @@
+# Render one-click blueprint. With this file, Render auto-fills the build/start
+# commands, adds a persistent disk for your database, and generates JWT_SECRET.
+# Deploy: render.com -> New + -> Blueprint -> pick this repo.
+services:
+  - type: web
+    name: sailone-crm
+    runtime: node
+    plan: starter            # smallest paid plan; needed for a persistent disk.
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true   # Render creates a strong random secret for you.
+      - key: DB_PATH
+        value: /data/sailone_crm.db
+      # Fill these in the Render dashboard when you're ready (leave blank for now):
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false
+    disk:
+      name: crm-data
+      mountPath: /data        # database lives here so it survives redeploys.
+      sizeGB: 1

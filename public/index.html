@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SailOne CRM</title>
+<style>
+  :root{
+    --navy:#0b1f3a; --blue:#1763d6; --sky:#3b9bff; --bg:#f4f7fb;
+    --card:#fff; --line:#e2e8f0; --text:#0f172a; --muted:#64748b; --ok:#16a34a; --danger:#dc2626;
+  }
+  *{box-sizing:border-box} body{margin:0;font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
+  button{cursor:pointer;font:inherit}
+  .hidden{display:none!important}
+  /* Auth */
+  #auth{min-height:100vh;display:flex;align-items:center;justify-content:center;
+    background:linear-gradient(135deg,var(--navy),var(--blue))}
+  .auth-card{background:#fff;padding:36px;border-radius:16px;width:360px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:22px;color:var(--navy)}
+  .brand .dot{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,var(--blue),var(--sky))}
+  .brand small{color:var(--sky)}
+  input,select,textarea{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;margin-top:6px}
+  label{font-size:13px;color:var(--muted);display:block;margin-top:12px}
+  .btn{background:var(--blue);color:#fff;border:none;padding:11px 16px;border-radius:9px;font-weight:600;width:100%;margin-top:18px}
+  .btn.sec{background:#eef2f7;color:var(--navy)}
+  .link{color:var(--blue);background:none;border:none;font-size:13px;margin-top:14px;width:100%}
+  .err{color:var(--danger);font-size:13px;margin-top:10px;min-height:16px}
+  /* App shell */
+  header{background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:space-between;padding:12px 22px}
+  header .brand{color:#fff}
+  nav{display:flex;gap:6px;background:#fff;padding:8px 22px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  nav button{border:none;background:none;padding:9px 14px;border-radius:8px;color:var(--muted);font-weight:600}
+  nav button.active{background:var(--blue);color:#fff}
+  main{padding:22px;max-width:1100px;margin:0 auto}
+  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:16px}
+  .stat .n{font-size:26px;font-weight:800;color:var(--navy)} .stat .l{color:var(--muted);font-size:13px}
+  .row{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+  table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  th,td{text-align:left;padding:11px 13px;border-bottom:1px solid var(--line);font-size:14px}
+  th{background:#f8fafc;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+  tr:last-child td{border-bottom:none}
+  .pill{padding:3px 9px;border-radius:99px;font-size:12px;font-weight:600;background:#e0edff;color:var(--blue)}
+  .small{padding:6px 11px;font-size:13px;width:auto}
+  .danger{background:var(--danger)} .ghost{background:#eef2f7;color:var(--navy)}
+  /* Modal */
+  .overlay{position:fixed;inset:0;background:rgba(15,23,42,.5);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50}
+  .modal{background:#fff;border-radius:16px;padding:24px;width:480px;max-height:90vh;overflow:auto}
+  .field-wrap{position:relative}
+  .mic{position:absolute;right:8px;top:32px;width:34px;height:34px;border-radius:8px;border:none;background:#eef2f7;font-size:16px}
+  .mic.rec{background:var(--danger);color:#fff;animation:pulse 1s infinite}
+  @keyframes pulse{50%{opacity:.5}}
+  .muted{color:var(--muted);font-size:13px}
+  .step{border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:10px}
+</style>
+</head>
+<body>
+
+<!-- ============ AUTH ============ -->
+<section id="auth">
+  <div class="auth-card">
+    <div class="brand"><span class="dot"></span>SailOne<small>.ai</small></div>
+    <p class="muted" style="margin:8px 0 4px">Your voice-driven CRM</p>
+    <div id="loginForm">
+      <label>Email</label><input id="li_email" type="email" />
+      <label>Password</label><input id="li_pass" type="password" />
+      <button class="btn" onclick="login()">Log in</button>
+      <button class="link" onclick="toggleAuth()">New here? Create an account</button>
+    </div>
+    <div id="registerForm" class="hidden">
+      <label>Name</label><input id="rg_name" />
+      <label>Email</label><input id="rg_email" type="email" />
+      <label>Password</label><input id="rg_pass" type="password" />
+      <button class="btn" onclick="register()">Create account</button>
+      <button class="link" onclick="toggleAuth()">Have an account? Log in</button>
+    </div>
+    <div class="err" id="authErr"></div>
+  </div>
+</section>
+
+<!-- ============ APP ============ -->
+<div id="app" class="hidden">
+  <header>
+    <div class="brand"><span class="dot"></span>SailOne<small style="color:var(--sky)">.ai</small> CRM</div>
+    <div>
+      <span class="muted" id="who" style="color:#cbd5e1;margin-right:12px"></span>
+      <button class="small ghost" onclick="enablePush()">🔔 Phone alerts</button>
+      <button class="small ghost" onclick="logout()">Log out</button>
+    </div>
+  </header>
+  <nav>
+    <button data-tab="dashboard" class="active" onclick="showTab('dashboard')">Dashboard</button>
+    <button data-tab="leads" onclick="showTab('leads')">Leads</button>
+    <button data-tab="contacts" onclick="showTab('contacts')">Contacts</button>
+    <button data-tab="opportunities" onclick="showTab('opportunities')">Opportunities</button>
+    <button data-tab="reminders" onclick="showTab('reminders')">Reminders</button>
+    <button data-tab="journeys" onclick="showTab('journeys')">Journeys</button>
+  </nav>
+  <main id="content"></main>
+</div>
+
+<div id="modalRoot"></div>
+
+<script>
+/* ---------- tiny API helper ---------- */
+const api = async (url, method='GET', body) => {
+  const r = await fetch('/api'+url, {
+    method, credentials:'same-origin',
+    headers:{'Content-Type':'application/json'},
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if(!r.ok) throw new Error((await r.json().catch(()=>({}))).error || r.statusText);
+  return r.json();
+};
+
+/* ---------- auth ---------- */
+function toggleAuth(){loginForm.classList.toggle('hidden');registerForm.classList.toggle('hidden');authErr.textContent='';}
+async function login(){
+  try{ const {user}=await api('/login','POST',{email:li_email.value,password:li_pass.value}); start(user);}
+  catch(e){authErr.textContent=e.message;}
+}
+async function register(){
+  try{ const {user}=await api('/register','POST',{name:rg_name.value,email:rg_email.value,password:rg_pass.value}); start(user);}
+  catch(e){authErr.textContent=e.message;}
+}
+async function logout(){ await api('/logout','POST'); location.reload(); }
+
+async function boot(){
+  try{ const {user}=await api('/me'); start(user);}catch{ /* show auth */ }
+}
+function start(user){
+  document.getElementById('auth').classList.add('hidden');
+  app.classList.remove('hidden');
+  who.textContent = user.name + ' · ' + user.email;
+  registerSW();
+  showTab('dashboard');
+}
+
+/* ---------- voice entry (Web Speech API) ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+function attachMic(btn, input){
+  if(!SR){ btn.style.display='none'; return; }
+  btn.onclick=()=>{
+    const rec=new SR(); rec.lang='en-US'; rec.interimResults=false;
+    btn.classList.add('rec');
+    rec.onresult=e=>{ input.value=(input.value?input.value+' ':'')+e.results[0][0].transcript; };
+    rec.onend=()=>btn.classList.remove('rec');
+    rec.onerror=()=>btn.classList.remove('rec');
+    rec.start();
+  };
+}
+// builds a labelled field with a mic button
+function field(label, name, type='text', value=''){
+  const ta = type==='textarea';
+  return `<div class="field-wrap">
+    <label>${label}</label>
+    ${ta?`<textarea data-f="${name}" rows="3">${value||''}</textarea>`
+        :`<input data-f="${name}" type="${type}" value="${value??''}">`}
+    <button class="mic" data-mic="${name}" title="Speak">🎤</button>
+  </div>`;
+}
+function wireMics(root){
+  root.querySelectorAll('[data-mic]').forEach(btn=>{
+    const input=root.querySelector(`[data-f="${btn.dataset.mic}"]`);
+    attachMic(btn,input);
+  });
+}
+const collect = root => {
+  const o={}; root.querySelectorAll('[data-f]').forEach(el=>o[el.dataset.f]=el.value); return o;
+};
+
+/* ---------- modal ---------- */
+function modal(html){
+  modalRoot.innerHTML=`<div class="overlay" onclick="if(event.target===this)closeModal()">
+    <div class="modal">${html}</div></div>`;
+  wireMics(modalRoot);
+}
+function closeModal(){modalRoot.innerHTML='';}
+
+/* ---------- tabs ---------- */
+let TAB='dashboard';
+function showTab(t){
+  TAB=t;
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));
+  ({dashboard,leads,contacts,opportunities,reminders,journeys})[t]();
+}
+
+/* ---------- DASHBOARD ---------- */
+async function dashboard(){
+  const s=await api('/stats');
+  content.innerHTML=`<div class="cards">
+    <div class="stat"><div class="n">${s.leads}</div><div class="l">Leads</div></div>
+    <div class="stat"><div class="n">${s.contacts}</div><div class="l">Contacts</div></div>
+    <div class="stat"><div class="n">${s.opportunities}</div><div class="l">Opportunities</div></div>
+    <div class="stat"><div class="n">$${Number(s.pipeline).toLocaleString()}</div><div class="l">Open pipeline</div></div>
+  </div>
+  <p class="muted">Standard flow: capture a <b>Lead</b> → convert to a <b>Contact</b> → attach <b>Opportunities</b>. Use 🎤 on any field to enter data by voice.</p>`;
+}
+
+/* ---------- LEADS ---------- */
+async function leads(){
+  const rows=await api('/leads');
+  content.innerHTML=`<div class="row"><h2>Leads</h2><button class="btn small" onclick="leadForm()">+ New lead</button></div>
+  <table><tr><th>Name</th><th>Company</th><th>Status</th><th>Phone</th><th></th></tr>
+  ${rows.map(l=>`<tr>
+    <td>${l.name}</td><td>${l.company||''}</td>
+    <td><span class="pill">${l.status}</span></td><td>${l.phone||''}</td>
+    <td style="text-align:right">
+      ${l.status!=='converted'?`<button class="small" onclick="convert(${l.id})">Convert →</button>`:''}
+      <button class="small ghost" onclick='leadForm(${JSON.stringify(l)})'>Edit</button>
+      <button class="small danger" onclick="del('leads',${l.id})">✕</button>
+    </td></tr>`).join('')||'<tr><td colspan=5 class=muted>No leads yet.</td></tr>'}
+  </table>`;
+}
+function leadForm(l={}){
+  modal(`<h3>${l.id?'Edit':'New'} lead</h3>
+   ${field('Name','name','text',l.name)}
+   ${field('Company','company','text',l.company)}
+   ${field('Email','email','email',l.email)}
+   ${field('Phone','phone','text',l.phone)}
+   ${field('Source','source','text',l.source)}
+   <label>Status</label><select data-f="status">
+     ${['new','working','qualified','lost'].map(s=>`<option ${l.status===s?'selected':''}>${s}</option>`).join('')}
+   </select>
+   ${field('Notes','notes','textarea',l.notes)}
+   <button class="btn" onclick="saveLead(${l.id||0})">Save</button>`);
+}
+async function saveLead(id){
+  const d=collect(modalRoot);
+  await api('/leads'+(id?'/'+id:''), id?'PUT':'POST', d);
+  closeModal(); leads();
+}
+async function convert(id){
+  modal(`<h3>Convert lead to contact</h3>
+   <p class="muted">This creates a Contact from the lead. Optionally open an opportunity too.</p>
+   <label><input type="checkbox" id="cv_opp" style="width:auto"> Also create an opportunity</label>
+   ${field('Opportunity title','opportunityTitle')}
+   ${field('Value ($)','value','number')}
+   <button class="btn" onclick="doConvert(${id})">Convert</button>`);
+}
+async function doConvert(id){
+  const d=collect(modalRoot);
+  await api('/leads/'+id+'/convert','POST',{createOpportunity:cv_opp.checked,opportunityTitle:d.opportunityTitle,value:Number(d.value||0)});
+  closeModal(); showTab('contacts');
+}
+
+/* ---------- CONTACTS ---------- */
+async function contacts(){
+  const rows=await api('/contacts');
+  content.innerHTML=`<div class="row"><h2>Contacts</h2><button class="btn small" onclick="contactForm()">+ New contact</button></div>
+  <table><tr><th>Name</th><th>Company</th><th>Email</th><th>Phone</th><th></th></tr>
+  ${rows.map(c=>`<tr><td>${c.name}</td><td>${c.company||''}</td><td>${c.email||''}</td><td>${c.phone||''}</td>
+   <td style="text-align:right">
+     <button class="small" onclick="remindFor(${c.id},'${(c.name||'').replace(/'/g,'')}')">Remind</button>
+     <button class="small ghost" onclick='contactForm(${JSON.stringify(c)})'>Edit</button>
+     <button class="small danger" onclick="del('contacts',${c.id})">✕</button>
+   </td></tr>`).join('')||'<tr><td colspan=5 class=muted>No contacts yet.</td></tr>'}
+  </table>`;
+}
+function contactForm(c={}){
+  modal(`<h3>${c.id?'Edit':'New'} contact</h3>
+   ${field('Name','name','text',c.name)}
+   ${field('Company','company','text',c.company)}
+   ${field('Title','title','text',c.title)}
+   ${field('Email','email','email',c.email)}
+   ${field('Phone','phone','text',c.phone)}
+   ${field('Notes','notes','textarea',c.notes)}
+   <button class="btn" onclick="saveContact(${c.id||0})">Save</button>`);
+}
+async function saveContact(id){
+  await api('/contacts'+(id?'/'+id:''),id?'PUT':'POST',collect(modalRoot));
+  closeModal(); contacts();
+}
+
+/* ---------- OPPORTUNITIES ---------- */
+async function opportunities(){
+  const [rows,cts]=await Promise.all([api('/opportunities'),api('/contacts')]);
+  window._contacts=cts;
+  content.innerHTML=`<div class="row"><h2>Opportunities</h2><button class="btn small" onclick="oppForm()">+ New opportunity</button></div>
+  <table><tr><th>Title</th><th>Value</th><th>Stage</th><th>Close date</th><th></th></tr>
+  ${rows.map(o=>`<tr><td>${o.title}</td><td>$${Number(o.value).toLocaleString()}</td>
+   <td><span class="pill">${o.stage}</span></td><td>${o.close_date||''}</td>
+   <td style="text-align:right">
+     <button class="small ghost" onclick='oppForm(${JSON.stringify(o)})'>Edit</button>
+     <button class="small danger" onclick="del('opportunities',${o.id})">✕</button>
+   </td></tr>`).join('')||'<tr><td colspan=5 class=muted>No opportunities yet.</td></tr>'}
+  </table>`;
+}
+function oppForm(o={}){
+  const opts=(window._contacts||[]).map(c=>`<option value="${c.id}" ${o.contact_id===c.id?'selected':''}>${c.name}</option>`).join('');
+  modal(`<h3>${o.id?'Edit':'New'} opportunity</h3>
+   ${field('Title','title','text',o.title)}
+   ${field('Value ($)','value','number',o.value)}
+   <label>Contact</label><select data-f="contact_id"><option value="">—</option>${opts}</select>
+   <label>Stage</label><select data-f="stage">
+     ${['prospecting','proposal','negotiation','won','lost'].map(s=>`<option ${o.stage===s?'selected':''}>${s}</option>`).join('')}
+   </select>
+   ${field('Close date','close_date','date',o.close_date)}
+   ${field('Notes','notes','textarea',o.notes)}
+   <button class="btn" onclick="saveOpp(${o.id||0})">Save</button>`);
+}
+async function saveOpp(id){
+  const d=collect(modalRoot); d.value=Number(d.value||0);
+  await api('/opportunities'+(id?'/'+id:''),id?'PUT':'POST',d);
+  closeModal(); opportunities();
+}
+
+/* ---------- REMINDERS ---------- */
+async function reminders(){
+  const rows=await api('/reminders');
+  content.innerHTML=`<div class="row"><h2>Reminders</h2><button class="btn small" onclick="remindFor()">+ New reminder</button></div>
+  <table><tr><th>Title</th><th>Channel</th><th>Due</th><th>Status</th><th></th></tr>
+  ${rows.map(r=>`<tr><td>${r.title}</td><td>${r.channel==='push'?'📱 Phone':'✉️ Email'}</td>
+   <td>${r.due_at}</td><td>${r.sent?'✅ sent':'⏳ pending'}</td>
+   <td style="text-align:right"><button class="small danger" onclick="del('reminders',${r.id})">✕</button></td></tr>`).join('')
+   ||'<tr><td colspan=5 class=muted>No reminders.</td></tr>'}
+  </table>`;
+}
+async function remindFor(contactId,name){
+  const cts=await api('/contacts');
+  const opts=cts.map(c=>`<option value="${c.id}" ${c.id===contactId?'selected':''}>${c.name}</option>`).join('');
+  modal(`<h3>New reminder</h3>
+   <label>Channel</label><select data-f="channel">
+     <option value="push">📱 Push to my phone (call/email them)</option>
+     <option value="email">✉️ Email the customer</option>
+   </select>
+   <label>Contact</label><select data-f="contact_id"><option value="">—</option>${opts}</select>
+   ${field('Title','title','text', name?('Follow up with '+name):'')}
+   ${field('Message','body','textarea')}
+   <label>Due at</label><input data-f="due_at" type="datetime-local">
+   <button class="btn" onclick="saveReminder()">Schedule</button>`);
+}
+async function saveReminder(){
+  const d=collect(modalRoot);
+  d.due_at=d.due_at?d.due_at.replace('T',' ')+':00':new Date().toISOString();
+  await api('/reminders','POST',d); closeModal(); reminders();
+}
+
+/* ---------- JOURNEYS ---------- */
+async function journeys(){
+  const [rows,cts]=await Promise.all([api('/journeys'),api('/contacts')]);
+  window._contacts=cts;
+  content.innerHTML=`<div class="row"><h2>Customer journeys</h2><button class="btn small" onclick="journeyForm()">+ New journey</button></div>
+  ${rows.map(j=>`<div class="step"><div class="row" style="margin:0">
+     <b>${j.name}</b>
+     <span>
+       <button class="small" onclick="enrollForm(${j.id})">Enroll contact</button>
+       <button class="small danger" onclick="del('journeys',${j.id})">✕</button>
+     </span></div>
+     <div class="muted">${j.steps.map(s=>`Day ${s.day_offset}: ${s.subject}`).join(' · ')||'no steps'}</div>
+   </div>`).join('')||'<p class="muted">No journeys yet. A journey is a sequence of emails sent automatically over days.</p>'}`;
+}
+let _steps=[];
+function journeyForm(){
+  _steps=[{day_offset:0,subject:'',body:''}];
+  renderJourneyModal();
+}
+function renderJourneyModal(){
+  modal(`<h3>New customer journey</h3>
+   ${field('Journey name','jname')}
+   <div id="stepsBox">${_steps.map((s,i)=>`
+     <div class="step">
+       <label>Send on day</label><input type="number" value="${s.day_offset}" oninput="_steps[${i}].day_offset=+this.value" style="width:90px">
+       <label>Subject</label><input value="${s.subject}" oninput="_steps[${i}].subject=this.value">
+       <label>Body <span class="muted">(use {{name}}, {{company}})</span></label>
+       <textarea rows="3" oninput="_steps[${i}].body=this.value">${s.body}</textarea>
+     </div>`).join('')}</div>
+   <button class="btn sec" onclick="_steps.push({day_offset:0,subject:'',body:''});syncJName();renderJourneyModal()">+ Add step</button>
+   <button class="btn" onclick="saveJourney()">Save journey</button>`);
+}
+function syncJName(){ const el=modalRoot.querySelector('[data-f="jname"]'); if(el)_jname=el.value; }
+let _jname='';
+async function saveJourney(){
+  const name=modalRoot.querySelector('[data-f="jname"]').value||_jname;
+  await api('/journeys','POST',{name,steps:_steps});
+  closeModal(); journeys();
+}
+function enrollForm(jid){
+  const opts=(window._contacts||[]).map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  modal(`<h3>Enroll a contact</h3>
+   <label>Contact</label><select data-f="contact_id">${opts}</select>
+   <p class="muted">Emails will send automatically per the journey schedule.</p>
+   <button class="btn" onclick="doEnroll(${jid})">Enroll</button>`);
+}
+async function doEnroll(jid){
+  await api('/journeys/'+jid+'/enroll','POST',{contact_id:Number(modalRoot.querySelector('[data-f=contact_id]').value)});
+  closeModal(); journeys();
+}
+
+/* ---------- shared ---------- */
+async function del(table,id){ if(!confirm('Delete this item?'))return; await api('/'+table+'/'+id,'DELETE'); showTab(TAB); }
+
+/* ---------- push / phone reminders ---------- */
+function registerSW(){ if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{}); }
+function urlB64ToUint8Array(b){const p='='.repeat((4-b.length%4)%4);const s=(b+p).replace(/-/g,'+').replace(/_/g,'/');const r=atob(s);return Uint8Array.from([...r].map(c=>c.charCodeAt(0)));}
+async function enablePush(){
+  try{
+    const {key}=await api('/push/key');
+    if(!key){alert('Add VAPID keys to your .env to enable phone push (see README).');return;}
+    const perm=await Notification.requestPermission();
+    if(perm!=='granted')return;
+    const reg=await navigator.serviceWorker.ready;
+    const sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlB64ToUint8Array(key)});
+    await api('/push/subscribe','POST',sub);
+    await api('/push/test','POST');
+    alert('Phone alerts enabled — you should see a test notification.');
+  }catch(e){alert('Push setup: '+e.message);}
+}
+
+boot();
+</script>
+</body>
+</html>

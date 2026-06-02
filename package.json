@@ -1,0 +1,24 @@
+{
+  "name": "sailone-crm",
+  "version": "1.0.0",
+  "description": "SailOne.ai voice-enabled CRM with auth, email journeys and reminders",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.3.0",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^6.9.14",
+    "web-push": "^3.6.7"
+  }
+}

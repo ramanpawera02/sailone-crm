@@ -1,0 +1,11 @@
+  PASS password hashing verifies correctly
+  SKIP JWT test (jsonwebtoken dep not installed in sandbox)
+  PASS lead created with default status=new
+  PASS lead linked to new contact
+  PASS lead status -> converted
+  PASS opportunity created with value
+  PASS journey created with 2 steps
+  PASS reminder queued (unsent)
+  PASS dashboard stats compute (pipeline=$5000)
+
+RESULT: 8 passed, 0 failed
