@@ -6,7 +6,8 @@ const path = require('path');
 
 const db = require('./db');
 const { sign, requireAuth } = require('./auth');
-const { sendEmail, sendPush } = require('./notify');
+const { sendPush } = require('./notify');
+const { parseEntity } = require('./parse');
 const scheduler = require('./scheduler');
 
 const app = express();
@@ -14,38 +15,12 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 
-const now = () => "datetime('now')";
-
-/* ---------------- AUTH ---------------- */
-app.post('/api/register', (req, res) => {
-  const { name, email, password } = req.body;
-  if (!name || !email || !password)
-    return res.status(400).json({ error: 'name, email, password required' });
-  const exists = db.prepare('SELECT 1 FROM users WHERE email = ?').get(email);
-  if (exists) return res.status(409).json({ error: 'Email already registered' });
-  const hash = bcrypt.hashSync(password, 10);
-  const info = db
-    .prepare('INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)')
-    .run(name, email, hash);
-  const user = { id: info.lastInsertRowid, name, email };
-  res.cookie('token', sign(user), cookieOpts()).json({ user });
-});
-
-app.post('/api/login', (req, res) => {
-  const { email, password } = req.body;
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
-  if (!user || !bcrypt.compareSync(password, user.password_hash))
-    return res.status(401).json({ error: 'Invalid credentials' });
-  res
-    .cookie('token', sign(user), cookieOpts())
-    .json({ user: { id: user.id, name: user.name, email: user.email } });
-});
-
-app.post('/api/logout', (req, res) => {
-  res.clearCookie('token').json({ ok: true });
-});
-
-app.get('/api/me', requireAuth, (req, res) => res.json({ user: req.user }));
+// wraps an async route so thrown errors become a clean 500 instead of crashing
+const h = (fn) => (req, res) =>
+  Promise.resolve(fn(req, res)).catch((e) => {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  });
 
 function cookieOpts() {
   return {
@@ -56,47 +31,74 @@ function cookieOpts() {
   };
 }
 
-/* ---------------- Generic CRUD helper ---------------- */
+/* ---------------- AUTH ---------------- */
+app.post('/api/register', h(async (req, res) => {
+  const { name, email, password } = req.body;
+  if (!name || !email || !password)
+    return res.status(400).json({ error: 'name, email, password required' });
+  const exists = await db.get('SELECT 1 FROM users WHERE email = ?', [email]);
+  if (exists) return res.status(409).json({ error: 'Email already registered' });
+  const hash = bcrypt.hashSync(password, 10);
+  const { lastInsertRowid } = await db.run(
+    'INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?) RETURNING id',
+    [name, email, hash]
+  );
+  const user = { id: lastInsertRowid, name, email };
+  res.cookie('token', sign(user), cookieOpts()).json({ user });
+}));
+
+app.post('/api/login', h(async (req, res) => {
+  const { email, password } = req.body;
+  const user = await db.get('SELECT * FROM users WHERE email = ?', [email]);
+  if (!user || !bcrypt.compareSync(password, user.password_hash))
+    return res.status(401).json({ error: 'Invalid credentials' });
+  res
+    .cookie('token', sign(user), cookieOpts())
+    .json({ user: { id: user.id, name: user.name, email: user.email } });
+}));
+
+app.post('/api/logout', (req, res) => res.clearCookie('token').json({ ok: true }));
+app.get('/api/me', requireAuth, (req, res) => res.json({ user: req.user }));
+
+/* ---------------- Generic CRUD ---------------- */
 function crud(table, fields) {
   const r = express.Router();
   r.use(requireAuth);
 
-  r.get('/', (req, res) => {
-    const rows = db
-      .prepare(`SELECT * FROM ${table} WHERE user_id = ? ORDER BY updated_at DESC, created_at DESC`)
-      .all(req.user.id);
-    res.json(rows);
-  });
+  r.get('/', h(async (req, res) => {
+    res.json(await db.all(
+      `SELECT * FROM ${table} WHERE user_id = ? ORDER BY updated_at DESC, created_at DESC`,
+      [req.user.id]
+    ));
+  }));
 
-  r.post('/', (req, res) => {
+  r.post('/', h(async (req, res) => {
     const cols = fields.filter((f) => req.body[f] !== undefined);
     const placeholders = cols.map(() => '?').join(', ');
-    const stmt = db.prepare(
+    const { lastInsertRowid } = await db.run(
       `INSERT INTO ${table} (user_id${cols.length ? ', ' + cols.join(', ') : ''})
-       VALUES (?${cols.length ? ', ' + placeholders : ''})`
+       VALUES (?${cols.length ? ', ' + placeholders : ''}) RETURNING id`,
+      [req.user.id, ...cols.map((c) => req.body[c])]
     );
-    const info = stmt.run(req.user.id, ...cols.map((c) => req.body[c]));
-    res.json(db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(info.lastInsertRowid));
-  });
+    res.json(await db.get(`SELECT * FROM ${table} WHERE id = ?`, [lastInsertRowid]));
+  }));
 
-  r.put('/:id', (req, res) => {
+  r.put('/:id', h(async (req, res) => {
     const cols = fields.filter((f) => req.body[f] !== undefined);
     if (!cols.length) return res.status(400).json({ error: 'nothing to update' });
     const setClause = cols.map((c) => `${c} = ?`).join(', ');
-    db.prepare(
-      `UPDATE ${table} SET ${setClause}, updated_at = datetime('now')
-       WHERE id = ? AND user_id = ?`
-    ).run(...cols.map((c) => req.body[c]), req.params.id, req.user.id);
-    res.json(db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(req.params.id));
-  });
-
-  r.delete('/:id', (req, res) => {
-    db.prepare(`DELETE FROM ${table} WHERE id = ? AND user_id = ?`).run(
-      req.params.id,
-      req.user.id
+    await db.run(
+      `UPDATE ${table} SET ${setClause}, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND user_id = ?`,
+      [...cols.map((c) => req.body[c]), req.params.id, req.user.id]
     );
+    res.json(await db.get(`SELECT * FROM ${table} WHERE id = ?`, [req.params.id]));
+  }));
+
+  r.delete('/:id', h(async (req, res) => {
+    await db.run(`DELETE FROM ${table} WHERE id = ? AND user_id = ?`, [req.params.id, req.user.id]);
     res.json({ ok: true });
-  });
+  }));
 
   return r;
 }
@@ -105,130 +107,161 @@ app.use('/api/leads', crud('leads', ['name', 'company', 'email', 'phone', 'sourc
 app.use('/api/contacts', crud('contacts', ['name', 'company', 'email', 'phone', 'title', 'notes', 'from_lead_id']));
 app.use('/api/opportunities', crud('opportunities', ['contact_id', 'title', 'value', 'stage', 'close_date', 'notes']));
 
-/* ---------------- Conversion flow: Lead -> Contact ---------------- */
-app.post('/api/leads/:id/convert', requireAuth, (req, res) => {
-  const lead = db
-    .prepare('SELECT * FROM leads WHERE id = ? AND user_id = ?')
-    .get(req.params.id, req.user.id);
+/* ---------------- Voice: parse spoken text into fields for each entity ---------------- */
+// Match a spoken contact name to one of this user's contacts (case-insensitive,
+// exact-ish or partial). Returns { contact_id, contact_name } or {}.
+async function resolveContact(userId, spokenName) {
+  if (!spokenName) return {};
+  const n = spokenName.trim().toLowerCase();
+  const contacts = await db.all('SELECT id, name FROM contacts WHERE user_id = ?', [userId]);
+  let hit = contacts.find((c) => (c.name || '').toLowerCase() === n);
+  if (!hit) hit = contacts.find((c) => (c.name || '').toLowerCase().includes(n) || n.includes((c.name || '').toLowerCase()));
+  return hit ? { contact_id: hit.id, contact_name: hit.name } : { contact_name: spokenName };
+}
+
+app.post('/api/leads/parse', requireAuth, h(async (req, res) => {
+  res.json(await parseEntity('lead', req.body.transcript || '', { now: req.body.now }));
+}));
+
+app.post('/api/contacts/parse', requireAuth, h(async (req, res) => {
+  res.json(await parseEntity('contact', req.body.transcript || '', { now: req.body.now }));
+}));
+
+app.post('/api/opportunities/parse', requireAuth, h(async (req, res) => {
+  const f = await parseEntity('opportunity', req.body.transcript || '', { now: req.body.now });
+  Object.assign(f, await resolveContact(req.user.id, f.contact_name));
+  res.json(f);
+}));
+
+app.post('/api/reminders/parse', requireAuth, h(async (req, res) => {
+  const f = await parseEntity('reminder', req.body.transcript || '', { now: req.body.now });
+  Object.assign(f, await resolveContact(req.user.id, f.contact_name));
+  res.json(f);
+}));
+
+/* ---------------- Convert: Lead -> Contact (+ optional Opportunity) ---------------- */
+app.post('/api/leads/:id/convert', requireAuth, h(async (req, res) => {
+  const lead = await db.get('SELECT * FROM leads WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
-  const info = db
-    .prepare(
-      `INSERT INTO contacts (user_id, name, company, email, phone, notes, from_lead_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(req.user.id, lead.name, lead.company, lead.email, lead.phone, lead.notes, lead.id);
-  const contactId = info.lastInsertRowid;
+  const { lastInsertRowid: contactId } = await db.run(
+    `INSERT INTO contacts (user_id, name, company, email, phone, notes, from_lead_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+    [req.user.id, lead.name, lead.company, lead.email, lead.phone, lead.notes, lead.id]
+  );
 
-  db.prepare(`UPDATE leads SET status='converted', contact_id=?, updated_at=datetime('now') WHERE id=?`)
-    .run(contactId, lead.id);
+  await db.run(
+    `UPDATE leads SET status='converted', contact_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+    [contactId, lead.id]
+  );
 
-  // optionally spin up an opportunity at the same time
   let opportunity = null;
   if (req.body.createOpportunity) {
-    const oi = db
-      .prepare(
-        `INSERT INTO opportunities (user_id, contact_id, title, value, stage)
-         VALUES (?, ?, ?, ?, 'prospecting')`
-      )
-      .run(req.user.id, contactId, req.body.opportunityTitle || `${lead.name} opportunity`, req.body.value || 0);
-    opportunity = db.prepare('SELECT * FROM opportunities WHERE id = ?').get(oi.lastInsertRowid);
+    const { lastInsertRowid: oid } = await db.run(
+      `INSERT INTO opportunities (user_id, contact_id, title, value, stage)
+       VALUES (?, ?, ?, ?, 'prospecting') RETURNING id`,
+      [req.user.id, contactId, req.body.opportunityTitle || `${lead.name} opportunity`, req.body.value || 0]
+    );
+    opportunity = await db.get('SELECT * FROM opportunities WHERE id = ?', [oid]);
   }
 
   res.json({
-    contact: db.prepare('SELECT * FROM contacts WHERE id = ?').get(contactId),
+    contact: await db.get('SELECT * FROM contacts WHERE id = ?', [contactId]),
     opportunity,
   });
-});
+}));
 
 /* ---------------- Reminders ---------------- */
-app.get('/api/reminders', requireAuth, (req, res) => {
-  res.json(
-    db.prepare('SELECT * FROM reminders WHERE user_id = ? ORDER BY due_at').all(req.user.id)
-  );
-});
-app.post('/api/reminders', requireAuth, (req, res) => {
+app.get('/api/reminders', requireAuth, h(async (req, res) => {
+  res.json(await db.all('SELECT * FROM reminders WHERE user_id = ? ORDER BY due_at', [req.user.id]));
+}));
+app.post('/api/reminders', requireAuth, h(async (req, res) => {
   const { contact_id, channel, title, body, due_at } = req.body;
-  const info = db
-    .prepare(
-      `INSERT INTO reminders (user_id, contact_id, channel, title, body, due_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    )
-    .run(req.user.id, contact_id || null, channel || 'push', title, body || '', due_at);
-  res.json(db.prepare('SELECT * FROM reminders WHERE id = ?').get(info.lastInsertRowid));
-});
-app.delete('/api/reminders/:id', requireAuth, (req, res) => {
-  db.prepare('DELETE FROM reminders WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
+  const { lastInsertRowid } = await db.run(
+    `INSERT INTO reminders (user_id, contact_id, channel, title, body, due_at)
+     VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+    [req.user.id, contact_id || null, channel || 'push', title, body || '', due_at]
+  );
+  res.json(await db.get('SELECT * FROM reminders WHERE id = ?', [lastInsertRowid]));
+}));
+app.delete('/api/reminders/:id', requireAuth, h(async (req, res) => {
+  await db.run('DELETE FROM reminders WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
   res.json({ ok: true });
-});
+}));
 
-/* ---------------- Journeys (customer drip sequences) ---------------- */
-app.get('/api/journeys', requireAuth, (req, res) => {
-  const journeys = db.prepare('SELECT * FROM journeys WHERE user_id = ?').all(req.user.id);
+/* ---------------- Journeys ---------------- */
+app.get('/api/journeys', requireAuth, h(async (req, res) => {
+  const journeys = await db.all('SELECT * FROM journeys WHERE user_id = ?', [req.user.id]);
   for (const j of journeys) {
-    j.steps = db
-      .prepare('SELECT * FROM journey_steps WHERE journey_id = ? ORDER BY day_offset, step_order')
-      .all(j.id);
+    j.steps = await db.all(
+      'SELECT * FROM journey_steps WHERE journey_id = ? ORDER BY day_offset, step_order',
+      [j.id]
+    );
   }
   res.json(journeys);
-});
+}));
 
-app.post('/api/journeys', requireAuth, (req, res) => {
+app.post('/api/journeys', requireAuth, h(async (req, res) => {
   const { name, steps } = req.body;
-  const info = db.prepare('INSERT INTO journeys (user_id, name) VALUES (?, ?)').run(req.user.id, name);
-  const jid = info.lastInsertRowid;
-  (steps || []).forEach((s, i) => {
-    db.prepare(
-      `INSERT INTO journey_steps (journey_id, day_offset, subject, body, step_order)
-       VALUES (?, ?, ?, ?, ?)`
-    ).run(jid, s.day_offset || 0, s.subject, s.body, i);
-  });
-  res.json({ id: jid });
-});
-
-app.delete('/api/journeys/:id', requireAuth, (req, res) => {
-  db.prepare('DELETE FROM journeys WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
-  res.json({ ok: true });
-});
-
-app.post('/api/journeys/:id/enroll', requireAuth, (req, res) => {
-  const { contact_id } = req.body;
-  const info = db
-    .prepare('INSERT INTO enrollments (user_id, journey_id, contact_id) VALUES (?, ?, ?)')
-    .run(req.user.id, req.params.id, contact_id);
-  res.json({ id: info.lastInsertRowid });
-});
-
-/* ---------------- Web Push subscription ---------------- */
-app.get('/api/push/key', (req, res) => res.json({ key: process.env.VAPID_PUBLIC_KEY || '' }));
-app.post('/api/push/subscribe', requireAuth, (req, res) => {
-  db.prepare('INSERT INTO push_subscriptions (user_id, subscription) VALUES (?, ?)').run(
-    req.user.id,
-    JSON.stringify(req.body)
+  const { lastInsertRowid: jid } = await db.run(
+    'INSERT INTO journeys (user_id, name) VALUES (?, ?) RETURNING id',
+    [req.user.id, name]
   );
+  let i = 0;
+  for (const s of steps || []) {
+    await db.run(
+      `INSERT INTO journey_steps (journey_id, day_offset, subject, body, step_order)
+       VALUES (?, ?, ?, ?, ?) RETURNING id`,
+      [jid, s.day_offset || 0, s.subject, s.body, i++]
+    );
+  }
+  res.json({ id: jid });
+}));
+
+app.delete('/api/journeys/:id', requireAuth, h(async (req, res) => {
+  await db.run('DELETE FROM journeys WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
   res.json({ ok: true });
-});
-app.post('/api/push/test', requireAuth, async (req, res) => {
-  const subs = db.prepare('SELECT * FROM push_subscriptions WHERE user_id = ?').all(req.user.id);
+}));
+
+app.post('/api/journeys/:id/enroll', requireAuth, h(async (req, res) => {
+  const { lastInsertRowid } = await db.run(
+    'INSERT INTO enrollments (user_id, journey_id, contact_id) VALUES (?, ?, ?) RETURNING id',
+    [req.user.id, req.params.id, req.body.contact_id]
+  );
+  res.json({ id: lastInsertRowid });
+}));
+
+/* ---------------- Web Push ---------------- */
+app.get('/api/push/key', (req, res) => res.json({ key: process.env.VAPID_PUBLIC_KEY || '' }));
+app.post('/api/push/subscribe', requireAuth, h(async (req, res) => {
+  await db.run('INSERT INTO push_subscriptions (user_id, subscription) VALUES (?, ?) RETURNING id',
+    [req.user.id, JSON.stringify(req.body)]);
+  res.json({ ok: true });
+}));
+app.post('/api/push/test', requireAuth, h(async (req, res) => {
+  const subs = await db.all('SELECT * FROM push_subscriptions WHERE user_id = ?', [req.user.id]);
   for (const s of subs) await sendPush(s.subscription, { title: 'SailOne CRM', body: 'Test notification ✅' });
   res.json({ ok: true, devices: subs.length });
-});
+}));
 
-/* ---------------- Dashboard stats ---------------- */
-app.get('/api/stats', requireAuth, (req, res) => {
-  const one = (sql) => db.prepare(sql).get(req.user.id).n;
+/* ---------------- Stats ---------------- */
+app.get('/api/stats', requireAuth, h(async (req, res) => {
+  const n = async (sql) => (await db.get(sql, [req.user.id])).n;
   res.json({
-    leads: one('SELECT COUNT(*) n FROM leads WHERE user_id = ?'),
-    contacts: one('SELECT COUNT(*) n FROM contacts WHERE user_id = ?'),
-    opportunities: one('SELECT COUNT(*) n FROM opportunities WHERE user_id = ?'),
-    pipeline: db.prepare(
-      "SELECT COALESCE(SUM(value),0) n FROM opportunities WHERE user_id = ? AND stage NOT IN ('won','lost')"
-    ).get(req.user.id).n,
+    leads: await n('SELECT COUNT(*) n FROM leads WHERE user_id = ?'),
+    contacts: await n('SELECT COUNT(*) n FROM contacts WHERE user_id = ?'),
+    opportunities: await n('SELECT COUNT(*) n FROM opportunities WHERE user_id = ?'),
+    pipeline: await n("SELECT COALESCE(SUM(value),0) n FROM opportunities WHERE user_id = ? AND stage NOT IN ('won','lost')"),
   });
-});
+}));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`SailOne CRM running at http://localhost:${PORT}`);
-  scheduler.start();
+db.init().then(() => {
+  app.listen(PORT, () => {
+    console.log(`SailOne CRM running at http://localhost:${PORT}`);
+    scheduler.start();
+  });
+}).catch((e) => {
+  console.error('Failed to start: database error', e);
+  process.exit(1);
 });

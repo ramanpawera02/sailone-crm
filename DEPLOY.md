@@ -1,92 +1,91 @@
-# Deploying SailOne CRM
+# Deploying SailOne CRM on Render with a permanent database
 
-The folder now includes config files so deploying is mostly clicking buttons:
+Your data now lives in **PostgreSQL** — a real database that keeps everything safe no
+matter how many times the app restarts. You still deploy on Render exactly as before;
+you just point the app at a database. Total time: about 15 minutes.
 
-- `render.yaml` — one-click blueprint for **Render** (incl. a persistent disk).
-- `Procfile` — for **Railway** / Heroku-style hosts.
-- `Dockerfile` + `fly.toml` — for **Fly.io** or any container host.
-- `.gitignore` — keeps junk (node_modules, the local .db, logs) out of your repo.
+There are three pieces: **GitHub** (holds the code), **Neon** (the free permanent
+database), and **Render** (runs the app). Do them in order.
 
 ---
 
-## Step 0 — Get the code onto GitHub (needed for all hosts)
+## Step 1 — Code on GitHub
 
-1. Make a free account at github.com → **New repository** → name it `sailone-crm` → **Create**.
-2. On the new repo page, click **uploading an existing file** and drag in everything
-   from your `sailone-crm` folder. The `.gitignore` means it's safe to drag the whole
-   folder — Git skips `node_modules`, `.db`, and `.log` files automatically.
-3. Click **Commit changes**.
+If your code is already on GitHub from before, just replace the files with this updated
+version (drag the folder in again and commit). Otherwise:
 
-You'll also want a strong session secret ready. Generate one by running this in a terminal
-(Node installed), or just type a long random string of 40+ characters:
+1. github.com → **New repository** → name it `sailone-crm` → **Create**.
+2. Click **uploading an existing file**, drag in everything from the `sailone-crm`
+   folder, **Commit changes**. (The `.gitignore` keeps junk out automatically.)
+
+---
+
+## Step 2 — Create the free database on Neon
+
+1. Go to **neon.tech** and sign up (free, no card needed).
+2. It creates a project and a database for you automatically.
+3. On the project dashboard, find **Connection string** (sometimes under "Connect").
+   Copy it. It looks like:
+   ```
+   postgresql://username:password@ep-cool-name-123.us-east-2.aws.neon.tech/neondb?sslmode=require
+   ```
+4. Keep that string handy for the next step. That single line is everything the app
+   needs to reach your database.
+
+> Neon's free tier is meant to be permanent — it won't expire like Render's free
+> database does. Supabase works identically if you prefer it.
+
+---
+
+## Step 3 — Point Render at the database
+
+1. Open your CRM service on Render → **Environment**.
+2. Add one variable:
+   - **Key:** `DATABASE_URL`
+   - **Value:** *(paste the Neon connection string from Step 2)*
+3. While you're here, make sure these are also set (from earlier):
+   - `JWT_SECRET` — your long random secret
+   - `NODE_ENV` = `production`
+   - `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` — for phone push
+   - `ANTHROPIC_API_KEY` — for "Talk to add a lead" (get one at console.anthropic.com).
+     Optional; without it a basic built-in parser is used instead.
+4. Click **Save Changes**. Render redeploys automatically.
+
+When `DATABASE_URL` is present, the app automatically uses Postgres and creates all its
+tables on first start — you don't have to set anything up in the database yourself.
+
+**You can now delete the persistent-disk setup if you added one** — Postgres replaces it.
+Remove the `DB_PATH` variable too; it's only used by the local-file mode.
+
+That's it. Create your account on the live site and your data will stick around for good.
+
+---
+
+## What about the reminders sleeping?
+
+Separate from the database: on Render's **free** web-service plan the app sleeps when
+idle, and the every-minute reminder checker only runs while it's awake — so a reminder
+due during a nap won't fire on time. If on-time phone reminders matter, move the web
+service to the **Starter** plan (it stays awake 24/7). The database change above does not
+require any paid plan on its own.
+
+---
+
+## Running it on your own computer (optional)
+
+You don't need Postgres just to test locally. With no `DATABASE_URL` set, the app falls
+back to a local SQLite file:
 
 ```
-node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+npm install
+npm start         # opens http://localhost:3000, data saved to a local file
 ```
 
----
-
-## Option A — Render (recommended, easiest)
-
-1. Go to render.com and sign up with GitHub.
-2. **New + → Blueprint**. Pick your `sailone-crm` repo. Render reads `render.yaml` and
-   pre-fills everything, including a 1 GB persistent disk and an auto-generated
-   `JWT_SECRET`.
-3. Click **Apply**. In ~2 minutes you get a URL like `https://sailone-crm.onrender.com`.
-4. Open it, create your account, done.
-
-Add email/push later: service → **Environment** → fill in the blank `SMTP_*` and
-`VAPID_*` keys → Save (it redeploys automatically).
-
-> The blueprint uses the **starter** plan because a persistent disk (so your data
-> survives redeploys) requires it. If you'd rather start completely free, change
-> `plan: starter` to `plan: free` and delete the `disk:` block in `render.yaml` — just
-> know the database resets on each redeploy until you add the disk back.
+To test against Postgres locally instead, put `DATABASE_URL=...` in a `.env` file.
 
 ---
 
-## Option B — Railway
+## Other hosts
 
-1. Go to railway.app → sign in with GitHub → **New Project → Deploy from GitHub repo**.
-2. Pick `sailone-crm`. Railway detects Node and uses the `Procfile` (`npm start`).
-3. **Variables** tab → add `JWT_SECRET`, `NODE_ENV=production`, and `DB_PATH=/data/sailone_crm.db`.
-4. **Settings → Volumes** → add a volume mounted at `/data` (keeps your database).
-5. Railway gives you a public URL under **Settings → Networking → Generate Domain**.
-
----
-
-## Option C — Fly.io (most control, command-line)
-
-Install the Fly CLI (`flyctl`), then in the project folder:
-
-```
-fly auth signup          # or: fly auth login
-fly launch --no-deploy   # accepts the included fly.toml; pick a unique app name
-fly volumes create crm_data --size 1
-fly secrets set JWT_SECRET=your_long_random_secret
-fly deploy
-```
-
-Add email/push anytime with more `fly secrets set KEY=value` commands, then `fly deploy`.
-
----
-
-## After deploying — turning on the optional features
-
-**Email (reminders + journeys):** set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`,
-`MAIL_FROM`. For Gmail, make an App Password (Google Account → Security → 2-Step
-Verification → App passwords).
-
-**Phone push:** generate keys once with `npx web-push generate-vapid-keys`, set
-`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT=mailto:you@sailone.ai`. Then in
-the app click **🔔 Phone alerts** and allow notifications (add the site to your phone's
-home screen to get them there).
-
----
-
-## A note on growing up to Postgres
-
-SQLite on a persistent disk is perfectly fine for a solo business. If you later want
-multiple machines or automatic backups, switch to managed Postgres — `db.js` is the only
-file that talks to the database, so that's the single place to change. Ask me when you're
-ready and I'll convert it.
+The included `Dockerfile`, `fly.toml`, and `Procfile` still work for Railway / Fly.io —
+just set the same `DATABASE_URL` environment variable there instead of on Render.

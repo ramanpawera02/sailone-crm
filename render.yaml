@@ -1,11 +1,12 @@
-# Render one-click blueprint. With this file, Render auto-fills the build/start
-# commands, adds a persistent disk for your database, and generates JWT_SECRET.
-# Deploy: render.com -> New + -> Blueprint -> pick this repo.
+# Render blueprint. Deploy: render.com -> New + -> Blueprint -> pick this repo.
+# Data is stored in PostgreSQL: create a free database at neon.tech and paste its
+# connection string into the DATABASE_URL value (Render will prompt you, since it's
+# marked sync:false). No persistent disk or paid plan required for the database.
 services:
   - type: web
     name: sailone-crm
     runtime: node
-    plan: starter            # smallest paid plan; needed for a persistent disk.
+    plan: free               # bump to "starter" if you need 24/7 on-time reminders.
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /
@@ -14,9 +15,11 @@ services:
         value: production
       - key: JWT_SECRET
         generateValue: true   # Render creates a strong random secret for you.
-      - key: DB_PATH
-        value: /data/sailone_crm.db
-      # Fill these in the Render dashboard when you're ready (leave blank for now):
+      - key: DATABASE_URL
+        sync: false           # paste your Neon/Supabase Postgres connection string.
+      - key: ANTHROPIC_API_KEY
+        sync: false           # for "Talk to add a lead" (console.anthropic.com).
+      # Fill these when you're ready (leave blank for now):
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
@@ -33,7 +36,3 @@ services:
         sync: false
       - key: VAPID_SUBJECT
         sync: false
-    disk:
-      name: crm-data
-      mountPath: /data        # database lives here so it survives redeploys.
-      sizeGB: 1

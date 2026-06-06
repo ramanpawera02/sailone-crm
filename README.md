@@ -15,11 +15,19 @@ database to install), and one self-contained web page for the interface.
   (stored in a secure httpOnly cookie). Every record is scoped to the logged-in user.
 - **Standard CRM flow** — Leads → Contacts → Opportunities, with a one-click
   "Convert" that turns a lead into a contact (and optionally opens an opportunity).
-- **Voice data entry** — a 🎤 button next to every field. Tap it and speak; the text
-  drops into the field. Uses your browser's built-in speech recognition (best in Chrome).
+- **Talk to add anything** — a **🎤 Talk** button on the Leads, Contacts, Opportunities
+  and Reminders tabs. Describe it in plain speech and Claude sorts it into the right
+  fields, then opens the form pre-filled for you to review and save:
+    - *Lead/Contact:* "Jane Smith from Acme, email jane@acme.com, met at the trade show."
+    - *Opportunity:* "Deal with Acme, about 12 thousand dollars, in negotiation, closing end of next month." (the spoken contact is matched to your existing contacts)
+    - *Reminder:* "Remind me to call Jane next Tuesday at 10am about pricing." (the date/time is worked out for you)
+
+  Needs `ANTHROPIC_API_KEY`; without it a built-in parser still pulls out email, phone,
+  name, company and deal amounts.
 - **Backend database** — all leads, contacts, opportunities, reminders and journeys are
-  stored in `sailone_crm.db`. Uses `better-sqlite3` if installed, otherwise Node's
-  built-in SQLite — so it runs with zero native setup.
+  stored in a real database. In the cloud it uses **PostgreSQL** (set `DATABASE_URL`);
+  on your own computer it falls back to a local SQLite file automatically. `db.js` is the
+  only file that touches the database. See `DEPLOY.md` for the Neon + Render setup.
 - **Email reminders & customer journeys** — build multi-step drip sequences ("Day 0:
   welcome, Day 3: follow-up …") and enroll contacts. The scheduler sends each step
   automatically. Personalize with `{{name}}` and `{{company}}`.
@@ -80,16 +88,15 @@ steps will now actually send.
 
 ## Deploying to the cloud
 
-The app is a standard Node web server, so it runs on any Node host (Render, Railway,
-Fly.io, a VPS, etc.):
+See **`DEPLOY.md`** for the full click-by-click guide (GitHub → Neon Postgres → Render).
+In short:
 
 1. Push this folder to a Git repo.
-2. On the host, set the start command to `npm start` and add the `.env` values as
-   environment variables.
-3. Set `NODE_ENV=production` so the session cookie is sent only over HTTPS.
-4. Persist the database: keep `sailone_crm.db` on a mounted volume, **or** switch to
-   Postgres — `db.js` is the only file that touches the database, so it's the single
-   place to swap.
+2. Create a free PostgreSQL database (e.g. at neon.tech) and copy its connection string.
+3. On the host, set start command `npm start` and add environment variables:
+   `DATABASE_URL` (the connection string), `JWT_SECRET`, `NODE_ENV=production`, and the
+   `VAPID_*` keys for phone push.
+4. The app creates its tables automatically on first start. Your data is now permanent.
 
 ---
 
@@ -101,6 +108,7 @@ Fly.io, a VPS, etc.):
 | `db.js` | Database connection + schema (the only DB-specific file) |
 | `auth.js` | JWT signing + the "must be logged in" guard |
 | `notify.js` | Sending email (nodemailer) and push (web-push) |
+| `parse.js` | Turns spoken text into lead fields (Claude API, with a free fallback) |
 | `scheduler.js` | Runs every minute: fires due reminders, advances journeys |
 | `public/index.html` | The entire user interface (incl. voice entry) |
 | `public/sw.js` | Service worker that displays push notifications |
