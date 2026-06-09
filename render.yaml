@@ -17,8 +17,6 @@ services:
         generateValue: true   # Render creates a strong random secret for you.
       - key: DATABASE_URL
         sync: false           # paste your Neon/Supabase Postgres connection string.
-      - key: ANTHROPIC_API_KEY
-        sync: false           # for "Talk to add a lead" (console.anthropic.com).
       # Fill these when you're ready (leave blank for now):
       - key: SMTP_HOST
         sync: false

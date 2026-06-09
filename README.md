@@ -15,15 +15,10 @@ database to install), and one self-contained web page for the interface.
   (stored in a secure httpOnly cookie). Every record is scoped to the logged-in user.
 - **Standard CRM flow** — Leads → Contacts → Opportunities, with a one-click
   "Convert" that turns a lead into a contact (and optionally opens an opportunity).
-- **Talk to add anything** — a **🎤 Talk** button on the Leads, Contacts, Opportunities
-  and Reminders tabs. Describe it in plain speech and Claude sorts it into the right
-  fields, then opens the form pre-filled for you to review and save:
-    - *Lead/Contact:* "Jane Smith from Acme, email jane@acme.com, met at the trade show."
-    - *Opportunity:* "Deal with Acme, about 12 thousand dollars, in negotiation, closing end of next month." (the spoken contact is matched to your existing contacts)
-    - *Reminder:* "Remind me to call Jane next Tuesday at 10am about pricing." (the date/time is worked out for you)
-
-  Needs `ANTHROPIC_API_KEY`; without it a built-in parser still pulls out email, phone,
-  name, company and deal amounts.
+- **Voice data entry** — a 🎤 button next to every field. Tap it and speak; the spoken
+  text drops into that field. Uses your browser's built-in speech recognition (best in
+  Chrome/Edge) and needs no API key. In browsers without speech support the buttons hide
+  themselves and you just type.
 - **Backend database** — all leads, contacts, opportunities, reminders and journeys are
   stored in a real database. In the cloud it uses **PostgreSQL** (set `DATABASE_URL`);
   on your own computer it falls back to a local SQLite file automatically. `db.js` is the
@@ -108,7 +103,6 @@ In short:
 | `db.js` | Database connection + schema (the only DB-specific file) |
 | `auth.js` | JWT signing + the "must be logged in" guard |
 | `notify.js` | Sending email (nodemailer) and push (web-push) |
-| `parse.js` | Turns spoken text into lead fields (Claude API, with a free fallback) |
 | `scheduler.js` | Runs every minute: fires due reminders, advances journeys |
 | `public/index.html` | The entire user interface (incl. voice entry) |
 | `public/sw.js` | Service worker that displays push notifications |

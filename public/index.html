@@ -136,14 +136,34 @@ function start(user){
   showTab('dashboard');
 }
 
-/* ---------- form fields (no per-field mics) ---------- */
+/* ---------- voice entry (per-field mic, Web Speech API) ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+function attachMic(btn, input){
+  if(!SR){ btn.style.display='none'; return; }
+  btn.onclick=()=>{
+    const rec=new SR(); rec.lang='en-US'; rec.interimResults=false;
+    btn.classList.add('rec');
+    rec.onresult=e=>{ input.value=(input.value?input.value+' ':'')+e.results[0][0].transcript; };
+    rec.onend=()=>btn.classList.remove('rec');
+    rec.onerror=()=>btn.classList.remove('rec');
+    rec.start();
+  };
+}
+// builds a labelled field with a mic button
 function field(label, name, type='text', value=''){
   const ta = type==='textarea';
   return `<div class="field-wrap">
     <label>${label}</label>
     ${ta?`<textarea data-f="${name}" rows="3">${value||''}</textarea>`
         :`<input data-f="${name}" type="${type}" value="${value??''}">`}
+    <button class="mic" data-mic="${name}" title="Speak">🎤</button>
   </div>`;
+}
+function wireMics(root){
+  root.querySelectorAll('[data-mic]').forEach(btn=>{
+    const input=root.querySelector(`[data-f="${btn.dataset.mic}"]`);
+    attachMic(btn,input);
+  });
 }
 const collect = root => {
   const o={}; root.querySelectorAll('[data-f]').forEach(el=>o[el.dataset.f]=el.value); return o;
@@ -153,75 +173,9 @@ const collect = root => {
 function modal(html){
   modalRoot.innerHTML=`<div class="overlay" onclick="if(event.target===this)closeModal()">
     <div class="modal">${html}</div></div>`;
+  wireMics(modalRoot);
 }
 function closeModal(){modalRoot.innerHTML='';}
-
-/* ---------- conversational voice -> any entity ---------- */
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let _rec=null;
-const TALK = {
-  lead:        { endpoint:'/leads/parse',         noun:'lead',        open:f=>leadForm(f),
-                 eg:'"New lead Jane Smith from Acme, email jane@acme.com, phone 555-1234, met at the trade show, wants 50 seats."' },
-  contact:     { endpoint:'/contacts/parse',      noun:'contact',     open:f=>contactForm(f),
-                 eg:'"Add contact John Doe, VP of Sales at Globex, john@globex.com, 555-9876."' },
-  opportunity: { endpoint:'/opportunities/parse', noun:'opportunity', open:f=>oppFormFromVoice(f),
-                 eg:'"New opportunity with Acme, about 12 thousand dollars, in negotiation, closing end of next month."' },
-  reminder:    { endpoint:'/reminders/parse',     noun:'reminder',    open:f=>remindFromVoice(f),
-                 eg:'"Remind me to call Jane Smith next Tuesday at 10am about pricing."' },
-};
-function talkAdd(kind){
-  const t=TALK[kind];
-  modal(`<h3>🎤 Talk to add a ${t.noun}</h3>
-   <p class="muted">Tap <b>Start</b> and describe the ${t.noun} naturally — for example:<br>${t.eg}<br>Then tap <b>Stop</b> and review.</p>
-   <div class="row" style="margin:6px 0">
-     <button id="recBtn" class="btn small" style="width:auto" onclick="toggleRec()">● Start talking</button>
-     <span id="recState" class="muted"></span>
-   </div>
-   <label>What you said (you can edit this)</label>
-   <textarea id="talkText" rows="5" placeholder="Your words appear here..."></textarea>
-   <button class="btn" onclick="fillFromTalk('${kind}')">Turn this into a ${t.noun} →</button>`);
-  if(!SR){ recState.textContent='Voice not supported in this browser — you can type instead.'; recBtn.style.display='none'; }
-}
-function toggleRec(){
-  if(_rec){ _rec.stop(); return; }
-  _rec=new SR(); _rec.lang='en-US'; _rec.continuous=true; _rec.interimResults=true;
-  let finalText = talkText.value ? talkText.value+' ' : '';
-  recBtn.textContent='■ Stop'; recBtn.classList.add('danger'); recState.textContent='Listening…';
-  _rec.onresult=e=>{
-    let interim='';
-    for(let i=e.resultIndex;i<e.results.length;i++){
-      const t=e.results[i][0].transcript;
-      if(e.results[i].isFinal) finalText+=t+' '; else interim+=t;
-    }
-    talkText.value=(finalText+interim).trim();
-  };
-  _rec.onend=()=>{ _rec=null; recBtn.textContent='● Start talking'; recBtn.classList.remove('danger'); recState.textContent='Stopped.'; };
-  _rec.onerror=ev=>{ recState.textContent='Mic error: '+ev.error; };
-  _rec.start();
-}
-async function fillFromTalk(kind){
-  const transcript=talkText.value.trim();
-  if(!transcript){ recState.textContent='Say or type something first.'; return; }
-  if(_rec){ _rec.stop(); }
-  recState.textContent='Reading it…';
-  try{
-    const fields=await api(TALK[kind].endpoint,'POST',{transcript, now:new Date().toString()});
-    closeModal();
-    await TALK[kind].open(fields);   // opens the right form pre-filled, for your review
-  }catch(e){ recState.textContent='Could not parse: '+e.message; }
-}
-// opportunity needs the contacts list loaded for its dropdown
-async function oppFormFromVoice(f){
-  window._contacts = await api('/contacts');
-  oppForm({ title:f.title, value:Number(f.value||0)||'', stage:f.stage||'prospecting',
-            close_date:f.close_date, contact_id:f.contact_id, notes:f.notes });
-}
-// reminder: open the reminder form pre-filled
-function remindFromVoice(f){
-  remindForm({ channel:f.channel||'push', contact_id:f.contact_id,
-               title:f.title, body:f.body,
-               due_at:(f.due_at||'').replace(' ','T').slice(0,16) });
-}
 
 /* ---------- tabs ---------- */
 let TAB='dashboard';
@@ -240,16 +194,13 @@ async function dashboard(){
     <div class="stat"><div class="n">${s.opportunities}</div><div class="l">Opportunities</div></div>
     <div class="stat"><div class="n">$${Number(s.pipeline).toLocaleString()}</div><div class="l">Open pipeline</div></div>
   </div>
-  <p class="muted">Standard flow: capture a <b>Lead</b> → convert to a <b>Contact</b> → attach <b>Opportunities</b>. On the Leads tab, use <b>🎤 Talk to add a lead</b> to just describe a lead out loud and have the fields filled in for you.</p>`;
+  <p class="muted">Standard flow: capture a <b>Lead</b> → convert to a <b>Contact</b> → attach <b>Opportunities</b>. Tap the <b>🎤</b> next to any field to dictate it by voice.</p>`;
 }
 
 /* ---------- LEADS ---------- */
 async function leads(){
   const rows=await api('/leads');
-  content.innerHTML=`<div class="row"><h2>Leads</h2><span>
-      <button class="btn small" style="width:auto;margin-right:6px" onclick="talkLead()">🎤 Talk to add a lead</button>
-      <button class="btn small ghost" style="width:auto" onclick="leadForm()">+ New lead</button>
-    </span></div>
+  content.innerHTML=`<div class="row"><h2>Leads</h2><button class="btn small" style="width:auto" onclick="leadForm()">+ New lead</button></div>
   <table><tr><th>Name</th><th>Company</th><th>Status</th><th>Phone</th><th></th></tr>
   ${rows.map(l=>`<tr>
     <td>${l.name}</td><td>${l.company||''}</td>
@@ -296,10 +247,7 @@ async function doConvert(id){
 /* ---------- CONTACTS ---------- */
 async function contacts(){
   const rows=await api('/contacts');
-  content.innerHTML=`<div class="row"><h2>Contacts</h2><span>
-      <button class="btn small" style="width:auto;margin-right:6px" onclick="talkAdd('contact')">🎤 Talk to add a contact</button>
-      <button class="btn small ghost" style="width:auto" onclick="contactForm()">+ New contact</button>
-    </span></div>
+  content.innerHTML=`<div class="row"><h2>Contacts</h2><button class="btn small" style="width:auto" onclick="contactForm()">+ New contact</button></div>
   <table><tr><th>Name</th><th>Company</th><th>Email</th><th>Phone</th><th></th></tr>
   ${rows.map(c=>`<tr><td>${c.name}</td><td>${c.company||''}</td><td>${c.email||''}</td><td>${c.phone||''}</td>
    <td style="text-align:right">
@@ -328,10 +276,7 @@ async function saveContact(id){
 async function opportunities(){
   const [rows,cts]=await Promise.all([api('/opportunities'),api('/contacts')]);
   window._contacts=cts;
-  content.innerHTML=`<div class="row"><h2>Opportunities</h2><span>
-      <button class="btn small" style="width:auto;margin-right:6px" onclick="talkAdd('opportunity')">🎤 Talk to add an opportunity</button>
-      <button class="btn small ghost" style="width:auto" onclick="oppForm()">+ New opportunity</button>
-    </span></div>
+  content.innerHTML=`<div class="row"><h2>Opportunities</h2><button class="btn small" style="width:auto" onclick="oppForm()">+ New opportunity</button></div>
   <table><tr><th>Title</th><th>Value</th><th>Stage</th><th>Close date</th><th></th></tr>
   ${rows.map(o=>`<tr><td>${o.title}</td><td>$${Number(o.value).toLocaleString()}</td>
    <td><span class="pill">${o.stage}</span></td><td>${o.close_date||''}</td>
@@ -363,10 +308,7 @@ async function saveOpp(id){
 /* ---------- REMINDERS ---------- */
 async function reminders(){
   const rows=await api('/reminders');
-  content.innerHTML=`<div class="row"><h2>Reminders</h2><span>
-      <button class="btn small" style="width:auto;margin-right:6px" onclick="talkAdd('reminder')">🎤 Talk to schedule</button>
-      <button class="btn small ghost" style="width:auto" onclick="remindForm()">+ New reminder</button>
-    </span></div>
+  content.innerHTML=`<div class="row"><h2>Reminders</h2><button class="btn small" style="width:auto" onclick="remindForm()">+ New reminder</button></div>
   <table><tr><th>Title</th><th>Channel</th><th>Due</th><th>Status</th><th></th></tr>
   ${rows.map(r=>`<tr><td>${r.title}</td><td>${r.channel==='push'?'📱 Phone':'✉️ Email'}</td>
    <td>${r.due_at}</td><td>${r.sent?'✅ sent':'⏳ pending'}</td>

@@ -1,0 +1,13 @@
+Database ready (SQLite).
+(node:7) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  PASS user insert returns id (RETURNING works)
+  PASS password hashing verifies
+  PASS lead default status=new
+  PASS lead converted + linked to contact
+  PASS opportunity created with value
+  PASS journey created with 2 steps
+  PASS reminder queued (unsent)
+  PASS dashboard stats compute (pipeline=$5000)
+
+RESULT: 8 passed, 0 failed
