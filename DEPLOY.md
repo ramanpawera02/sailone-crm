@@ -47,6 +47,8 @@ version (drag the folder in again and commit). Otherwise:
    - `JWT_SECRET` — your long random secret
    - `NODE_ENV` = `production`
    - `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` — for phone push
+   - `ANTHROPIC_API_KEY` — for "Talk to add a lead" (get one at console.anthropic.com).
+     Optional; without it a basic built-in parser is used instead.
 4. Click **Save Changes**. Render redeploys automatically.
 
 When `DATABASE_URL` is present, the app automatically uses Postgres and creates all its

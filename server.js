@@ -7,6 +7,7 @@ const path = require('path');
 const db = require('./db');
 const { sign, requireAuth } = require('./auth');
 const { sendPush } = require('./notify');
+const { parseEntity } = require('./parse');
 const scheduler = require('./scheduler');
 
 const app = express();
@@ -105,6 +106,38 @@ function crud(table, fields) {
 app.use('/api/leads', crud('leads', ['name', 'company', 'email', 'phone', 'source', 'status', 'notes', 'contact_id']));
 app.use('/api/contacts', crud('contacts', ['name', 'company', 'email', 'phone', 'title', 'notes', 'from_lead_id']));
 app.use('/api/opportunities', crud('opportunities', ['contact_id', 'title', 'value', 'stage', 'close_date', 'notes']));
+
+/* ---------------- Voice: parse spoken text into fields for each entity ---------------- */
+// Match a spoken contact name to one of this user's contacts (case-insensitive,
+// exact-ish or partial). Returns { contact_id, contact_name } or {}.
+async function resolveContact(userId, spokenName) {
+  if (!spokenName) return {};
+  const n = spokenName.trim().toLowerCase();
+  const contacts = await db.all('SELECT id, name FROM contacts WHERE user_id = ?', [userId]);
+  let hit = contacts.find((c) => (c.name || '').toLowerCase() === n);
+  if (!hit) hit = contacts.find((c) => (c.name || '').toLowerCase().includes(n) || n.includes((c.name || '').toLowerCase()));
+  return hit ? { contact_id: hit.id, contact_name: hit.name } : { contact_name: spokenName };
+}
+
+app.post('/api/leads/parse', requireAuth, h(async (req, res) => {
+  res.json(await parseEntity('lead', req.body.transcript || '', { now: req.body.now }));
+}));
+
+app.post('/api/contacts/parse', requireAuth, h(async (req, res) => {
+  res.json(await parseEntity('contact', req.body.transcript || '', { now: req.body.now }));
+}));
+
+app.post('/api/opportunities/parse', requireAuth, h(async (req, res) => {
+  const f = await parseEntity('opportunity', req.body.transcript || '', { now: req.body.now });
+  Object.assign(f, await resolveContact(req.user.id, f.contact_name));
+  res.json(f);
+}));
+
+app.post('/api/reminders/parse', requireAuth, h(async (req, res) => {
+  const f = await parseEntity('reminder', req.body.transcript || '', { now: req.body.now });
+  Object.assign(f, await resolveContact(req.user.id, f.contact_name));
+  res.json(f);
+}));
 
 /* ---------------- Convert: Lead -> Contact (+ optional Opportunity) ---------------- */
 app.post('/api/leads/:id/convert', requireAuth, h(async (req, res) => {
